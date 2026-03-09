@@ -1,64 +1,64 @@
 {
     "t2i": {
         "R@1": {
-            "eva_clip": 0.158,
             "convnext_clip": 0.105,
+            "eva_clip": 0.158,
             "blip": 0.263,
             "siglip": 0.474
         },
         "R@5": {
-            "eva_clip": 0.214,
             "convnext_clip": 0.0,
+            "eva_clip": 0.214,
             "blip": 0.214,
             "siglip": 0.571
         },
         "R@10": {
-            "eva_clip": 0.208,
             "convnext_clip": 0.0,
+            "eva_clip": 0.208,
             "blip": 0.417,
             "siglip": 0.375
         },
         "mAP": {
-            "eva_clip": 0.222,
             "convnext_clip": 0.0,
+            "eva_clip": 0.222,
             "blip": 0.278,
             "siglip": 0.5
         },
         "NDCG": {
-            "eva_clip": 0.222,
             "convnext_clip": 0.0,
+            "eva_clip": 0.222,
             "blip": 0.278,
             "siglip": 0.5
         }
     },
     "i2t": {
         "R@1": {
-            "eva_clip": 0.111,
             "convnext_clip": 0.333,
+            "eva_clip": 0.111,
             "blip": 0.259,
             "siglip": 0.296
         },
         "R@5": {
-            "eva_clip": 0.353,
             "convnext_clip": 0.059,
+            "eva_clip": 0.353,
             "blip": 0.176,
             "siglip": 0.412
         },
         "R@10": {
-            "eva_clip": 0.333,
             "convnext_clip": 0.333,
+            "eva_clip": 0.333,
             "blip": 0.333,
             "siglip": 0.0
         },
         "mAP": {
-            "eva_clip": 0.2,
             "convnext_clip": 0.067,
+            "eva_clip": 0.2,
             "blip": 0.267,
             "siglip": 0.467
         },
         "NDCG": {
-            "eva_clip": 0.235,
             "convnext_clip": 0.118,
+            "eva_clip": 0.235,
             "blip": 0.235,
             "siglip": 0.412
         }

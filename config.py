@@ -17,7 +17,8 @@ TRAIN_JSONL = f"{FINETUNING_DIR}/train_t2i_rerank.jsonl"
 LORA_OUTPUT_DIR = f"{FINETUNING_DIR}/qwen2vl_t2i_lora"
 CACHE_I2T_FILE = f"{FINETUNING_DIR}/rerank_i2t_top5.json"
 CACHE_T2I_FILE = f"{FINETUNING_DIR}/rerank_t2i_top5.json"
-
+TEMPS_INDEX_CSV = f"{INDEX_DIR}/temps_indexation.csv"
+TEMPS_INDEX_FILE  = f"{INDEX_DIR}/temps_indexation.md"
 
 # --- CRÉATION AUTOMATIQUE ---
 # Ce bloc crée les dossiers s'ils n'existent pas encore sur une nouvelle machine
