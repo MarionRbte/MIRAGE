@@ -4,6 +4,7 @@ import json
 import random
 import torch
 import numpy as np
+import config
 from tqdm import tqdm
 from datasets import load_dataset, load_from_disk
 from transformers import (
@@ -20,21 +21,6 @@ from encoders import build_encoder
 # =====================================================================
 # 1. CONFIGURATION
 # =====================================================================
-DATASET_NAME = "flickr30k"
-BASE_DIR = f"./data/{DATASET_NAME}"
-DOSSIER_FINETUNING = f"{BASE_DIR}/finetuning"
-DOSSIER_DATASET = f"{BASE_DIR}/raw_data" # Assure-toi que les chemins correspondent à la Phase 1
-DOSSIER_SAUVEGARDE = f"{BASE_DIR}/index_sauvegardes"
-DOSSIER_GRID_SEARCH = f"{BASE_DIR}/grid_search"
-
-CHEMIN_POIDS = f"{DOSSIER_GRID_SEARCH}/best_weights.json"
-DOSSIER_LORA_T2I = f"{DOSSIER_FINETUNING}/qwen2vl_t2i_lora" 
-PATH_TRAIN_JSONL = f"{DOSSIER_FINETUNING}/train_t2i_rerank.jsonl"
-DOSSIER_IMAGES_TEMP = f"{BASE_DIR}/images_temp_train"
-
-os.makedirs(DOSSIER_IMAGES_TEMP, exist_ok=True)
-os.makedirs(DOSSIER_FINETUNING, exist_ok=True)
-
 NUM_SAMPLES_TRAIN = 3000 # Parfait pour le Fine-Tuning LoRA
 TOP_K_MINING = 5 
 
@@ -43,7 +29,7 @@ TOP_K_MINING = 5
 # =====================================================================
 def generate_sft_dataset_elite():
     print("🚀 Chargement du dataset...")
-    train_ds = load_from_disk(f"{DOSSIER_DATASET}/train")
+    train_ds = load_from_disk(f"{config.RAW_DATA_DIR}/train")
     
     # Optionnel : mélanger le dataset une fois avec un seed fixe pour avoir des images variées
     train_subset = train_ds.shuffle(seed=42).select(range(NUM_SAMPLES_TRAIN))
@@ -55,8 +41,8 @@ def generate_sft_dataset_elite():
     texts_for_encoding = [caps[0] for caps in captions_list]
 
     # --- CHARGEMENT DYNAMIQUE DES POIDS MIRAGE ---
-    print(f"⚖️ Récupération des poids optimaux depuis {CHEMIN_POIDS}...")
-    with open(CHEMIN_POIDS, 'r') as f:
+    print(f"⚖️ Récupération des poids optimaux depuis {config.BEST_WEIGHTS_FILE}...")
+    with open(config.BEST_WEIGHTS_FILE, 'r') as f:
         best_weights_data = json.load(f)
         
     # On choisit la métrique cible (mAP ou R@1)
@@ -90,8 +76,8 @@ def generate_sft_dataset_elite():
         S_fused += w * (t_vecs @ i_vecs.T)
         del enc; torch.cuda.empty_cache()
 
-    print(f"✍️ Préparation du fichier {PATH_TRAIN_JSONL} avec CoT Sémantique...")
-    with open(PATH_TRAIN_JSONL, 'w') as f:
+    print(f"✍️ Préparation du fichier {config.TRAIN_JSONL} avec CoT Sémantique...")
+    with open(config.TRAIN_JSONL, 'w') as f:
         for i in range(NUM_SAMPLES_TRAIN):
             # Mining des Hard Negatives (La fusion nous donne les pièges les plus réalistes)
             top_indices = np.argsort(S_fused[i])[::-1][:15].tolist()
@@ -123,7 +109,7 @@ def generate_sft_dataset_elite():
 
             content_user = []
             for img_idx in candidates:
-                img_path = os.path.join(DOSSIER_IMAGES_TEMP, f"train_image_{img_idx}.jpg")
+                img_path = os.path.join(config.IMAGES_TEMP_DIR, f"train_image_{img_idx}.jpg")
                 if not os.path.exists(img_path):
                     images_pil[img_idx].convert("RGB").save(img_path, "JPEG")
                 content_user.append({"type": "image", "image": f"file://{os.path.abspath(img_path)}"})
@@ -156,7 +142,7 @@ def generate_sft_dataset_elite():
 # =====================================================================
 # 3. CHARGEMENT MODÈLE ET PROCESSOR
 # =====================================================================
-if not os.path.exists(PATH_TRAIN_JSONL):
+if not os.path.exists(config.TRAIN_JSONL):
     generate_sft_dataset_elite()
     
 print("💎 Chargement du modèle et du processor...")
@@ -242,13 +228,13 @@ def collate_fn(examples):
     inputs["labels"] = labels
     return inputs
 
-dataset = load_dataset("json", data_files=PATH_TRAIN_JSONL, split="train")
+dataset = load_dataset("json", data_files=config.TRAIN_JSONL, split="train")
 
 # =====================================================================
 # 6. ENTRAÎNEMENT
 # =====================================================================
 training_args = TrainingArguments(
-    output_dir=DOSSIER_LORA_T2I,
+    output_dir=config.LORA_OUTPUT_DIR,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     learning_rate=5e-5,
@@ -276,6 +262,6 @@ trainer.train()
 # =====================================================================
 # 7. SAUVEGARDE
 # =====================================================================
-trainer.model.save_pretrained(DOSSIER_LORA_T2I)
-processor.save_pretrained(DOSSIER_LORA_T2I)
-print(f"✨ Terminé ! Les poids LoRA sont dans : {DOSSIER_LORA_T2I}")
+trainer.model.save_pretrained(config.LORA_OUTPUT_DIR)
+processor.save_pretrained(config.LORA_OUTPUT_DIR)
+print(f"✨ Terminé ! Les poids LoRA sont dans : {config.LORA_OUTPUT_DIR}")
