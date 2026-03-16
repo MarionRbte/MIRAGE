@@ -81,31 +81,48 @@ def generate_sft_dataset_elite():
         for i in range(NUM_SAMPLES_TRAIN):
             # Mining des Hard Negatives (La fusion nous donne les pièges les plus réalistes)
             top_indices = np.argsort(S_fused[i])[::-1][:15].tolist()
+
+            true_target_idx = i
             negatives = [idx for idx in top_indices if idx != i][:TOP_K_MINING-1]
-            candidates = negatives + [i]
             
-            # CRUCIAL : On trie les candidats EXACTEMENT comme le ferait le Stage 1 (Correction du biais)
-            candidates.sort(key=lambda idx: S_fused[i, idx], reverse=True)
+            # On simule la performance du Stage 2 : 
+            # 85% du temps, le Stage 2 a eu juste (La target est en position 1)
+            # 15% du temps, le Stage 2 s'est trompé (La target est reléguée plus bas)
+            if random.random() < 0.85:
+                candidates = [true_target_idx] + negatives
+            else:
+                # Simulation d'erreur : La vraie image n'est pas en position 1.
+                # On force la position 1 à être un mauvais candidat (le meilleur distracteur)
+                candidates = [negatives[0], true_target_idx] + negatives[1:]
+                
+                # On mélange les positions 2 à 5 (indices 1 à 4) pour que la vraie image 
+                # puisse atterrir n'importe où entre la position 2 et la position 5.
+                temp = candidates[1:]
+                random.shuffle(temp)
+                candidates = [candidates[0]] + temp
             
-            # Ajout d'une très légère dose de hasard (20%) pour la robustesse du VLM
-            if random.random() < 0.2:
-                random.shuffle(candidates)
+            target_pos = candidates.index(true_target_idx) + 1 # Position de 1 à 5
             
-            target_pos = candidates.index(i) + 1
-            
-            # --- LE NOUVEAU CoT DYNAMIQUE ---
             query = captions_list[i][0] 
             alt_captions = captions_list[i][1:3] 
             details_visuels = " ".join(alt_captions) if alt_captions else query
             
+            # --- LE NOUVEAU CoT STRUCTUREL ---
+            # Au lieu d'un texte générique, on force le modèle à adopter une structure d'analyse
             reasoning = (
-                f"Analysis: The user is looking for '{query}'. "
-                f"I will carefully verify the pre-ranked candidates. "
-                f"Image {target_pos} perfectly matches the specific details described, including: '{details_visuels}'. "
-                f"The other candidate images are hard negatives: they might share the general scene or objects, "
-                f"but they lack the precise visual constraints requested in the query. "
-                f"Therefore, Image {target_pos} must be ranked highest."
+                f"Analysis of the query '{query}':\n"
+                f"I need to find the exact match among the {TOP_K_MINING} candidates, paying close attention to specific details.\n"
+                f"Evaluation:\n"
             )
+            
+            # On simule une réflexion image par image pour forcer l'attention
+            for p in range(1, TOP_K_MINING + 1):
+                if p == target_pos:
+                    reasoning += f"- Image {p}: This image accurately depicts the specific details requested, specifically aligning with '{details_visuels}'.\n"
+                else:
+                    reasoning += f"- Image {p}: While it shares similarities, it lacks the precise visual constraints or fine-grained details of the query.\n"
+                    
+            reasoning += f"\nConclusion: Image {target_pos} is the only perfect match. Therefore, it must be ranked highest."
 
             content_user = []
             for img_idx in candidates:
@@ -117,8 +134,9 @@ def generate_sft_dataset_elite():
             prompt_text = (
                 f"You are an expert visual verifier. These {TOP_K_MINING} images are pre-ranked by an AI for the query: '{query}'. "
                 f"Image 1 is mathematically the most probable match. Your task is to verify this. "
-                f"Do NOT demote Image 1 unless another image clearly matches the subtle details better. "
-                f"Think step by step, penalize visual hallucinations, and output the Final Ranking."
+                f"Compare the images directly. Do NOT demote Image 1 unless another image clearly matches the subtle details better. "
+                f"Think step by step, penalize visual hallucinations, and output the Final Ranking.\n"
+                f"Format:\nFinal Ranking: [PositionA, PositionB, PositionC, PositionD, PositionE]"
             )
             content_user.append({"type": "text", "text": prompt_text})
             

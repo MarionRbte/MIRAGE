@@ -1,8 +1,8 @@
 import torch
-import re
 from abc import ABC, abstractmethod
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
+import re
 
 class BaseReranker(ABC):
     def __init__(self, device=None):
@@ -11,31 +11,6 @@ class BaseReranker(ABC):
     @abstractmethod
     def generate_response(self, prompt: str, images: list = None) -> str:
         pass
-
-    def parse_ranking(self, text: str, expected_len: int, keyword="Image") -> list:
-            # 1. On cherche la ligne "Final Ranking:" peu importe ce qui suit
-            match = re.search(r'Final Ranking:\s*(?:\[)?(.*?)(?:\])?$', text, re.IGNORECASE | re.MULTILINE)
-            
-            if match:
-                ranking_str = match.group(1)
-                # 2. On extrait tous les nombres trouvés dans cette ligne
-                numbers = [int(n) for n in re.findall(r'\d+', ranking_str)]
-                
-                final_order = []
-                for x in numbers:
-                    if 1 <= x <= expected_len and x not in final_order:
-                        final_order.append(x)
-                
-                # 3. Complétion si le modèle a oublié des éléments
-                missing = [i for i in range(1, expected_len + 1) if i not in final_order]
-                final_order.extend(missing)
-                
-                if len(final_order) == expected_len:
-                    return final_order
-            
-            # 4. Si le modèle n'a pas généré de "Final Ranking", on renvoie None pour gérer le fallback intelligemment
-            print(f"⚠️ Échec du parsing pour le texte. Application du fallback de sécurité.")
-            return None
 
 
 class Qwen2VLReranker(BaseReranker):
@@ -79,7 +54,7 @@ class Qwen2VLReranker(BaseReranker):
             videos=video_inputs,
             padding=True,
             return_tensors="pt",
-        ).to(self.device)
+        ).to(self.model.device)
 
         # Génération (Augmentée à 512 pour le raisonnement CoT)
         generated_ids = self.model.generate(**inputs, max_new_tokens=512) 
@@ -93,3 +68,51 @@ class Qwen2VLReranker(BaseReranker):
         )[0]
         
         return response
+    @torch.no_grad()
+    def score_image_pointwise_batch(self, prompt_texts: list, images_pil: list) -> list:
+        """
+        Version ultra-rapide (Batch) du Pointwise Reranking.
+        """
+        messages_batch = []
+        for prompt, img in zip(prompt_texts, images_pil):
+            content = [
+                {"type": "image", "image": img},
+                {"type": "text", "text": prompt}
+            ]
+            messages_batch.append([{"role": "user", "content": content}])
+        
+        # Préparation du batch
+        texts_batch = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages_batch]
+        image_inputs, video_inputs = process_vision_info(messages_batch)
+        
+        inputs = self.processor(
+            text=texts_batch,
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(self.model.device)
+
+        # Génération du batch en parallèle
+        outputs = self.model.generate(
+            **inputs, 
+            max_new_tokens=1, 
+            do_sample=False,
+            return_dict_in_generate=True,
+            output_scores=True
+        )
+        
+        # On récupère les probabilités pour les 5 éléments du batch
+        logits_batch = outputs.scores[0]
+        yes_token_id = self.processor.tokenizer.encode("Yes", add_special_tokens=False)[0]
+        no_token_id = self.processor.tokenizer.encode("No", add_special_tokens=False)[0]
+        
+        import math
+        probs_yes = []
+        for i in range(len(prompt_texts)):
+            yes_logit = logits_batch[i][yes_token_id].item()
+            no_logit = logits_batch[i][no_token_id].item()
+            prob = math.exp(yes_logit) / (math.exp(yes_logit) + math.exp(no_logit))
+            probs_yes.append(prob)
+            
+        return probs_yes
