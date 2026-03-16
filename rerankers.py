@@ -19,11 +19,7 @@ class Qwen2VLReranker(BaseReranker):
         print(f"⏳ Chargement de {model_id} en Bfloat16 (Sans quantification)...")
         
         # Processeur avec résolution optimisée pour voir les détails fins
-        self.processor = AutoProcessor.from_pretrained(
-            model_id, 
-            min_pixels=256*28*28, # ~ 450x450
-            max_pixels=512*28*28
-        )
+        self.processor = AutoProcessor.from_pretrained(model_id)
 
         # Chargement en Bfloat16 natif (Précision maximale pour une RTX 4080)
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
@@ -39,7 +35,8 @@ class Qwen2VLReranker(BaseReranker):
         content = []
         if images_pil:
             for img in images_pil:
-                content.append({"type": "image", "image": img})
+                # 🎯 LE SECRET EST ICI : On force l'équivalent 512x512 dynamique
+                content.append({"type": "image", "image": img, "max_pixels": 262144})
         
         content.append({"type": "text", "text": prompt_text})
         messages = [{"role": "user", "content": content}]
@@ -76,7 +73,8 @@ class Qwen2VLReranker(BaseReranker):
         messages_batch = []
         for prompt, img in zip(prompt_texts, images_pil):
             content = [
-                {"type": "image", "image": img},
+                # 🎯 LE SECRET EST ICI AUSSI
+                {"type": "image", "image": img, "max_pixels": 262144},
                 {"type": "text", "text": prompt}
             ]
             messages_batch.append([{"role": "user", "content": content}])
