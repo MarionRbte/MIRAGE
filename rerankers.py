@@ -25,7 +25,8 @@ class Qwen2VLReranker(BaseReranker):
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16, # Format haute précision
-            device_map="auto"           # Placement automatique sur la GPU
+            device_map="auto",           # Placement automatique sur la GPU
+            attn_implementation="flash_attention_2"
         ).eval()
         
         print("✅ Qwen2-VL chargé avec succès !")
@@ -36,7 +37,7 @@ class Qwen2VLReranker(BaseReranker):
         if images_pil:
             for img in images_pil:
                 # 🎯 LE SECRET EST ICI : On force l'équivalent 512x512 dynamique
-                content.append({"type": "image", "image": img, "max_pixels": 262144})
+                content.append({"type": "image", "image": img})
         
         content.append({"type": "text", "text": prompt_text})
         messages = [{"role": "user", "content": content}]
@@ -74,7 +75,7 @@ class Qwen2VLReranker(BaseReranker):
         for prompt, img in zip(prompt_texts, images_pil):
             content = [
                 # 🎯 LE SECRET EST ICI AUSSI
-                {"type": "image", "image": img, "max_pixels": 262144},
+                {"type": "image", "image": img},
                 {"type": "text", "text": prompt}
             ]
             messages_batch.append([{"role": "user", "content": content}])
@@ -114,3 +115,52 @@ class Qwen2VLReranker(BaseReranker):
             probs_yes.append(prob)
             
         return probs_yes
+    @torch.no_grad()
+    def score_image_cot_batch(self, prompt_texts: list, images_pil: list) -> list:
+        """
+        Version Chain of Thought (CoT). Le modèle génère un raisonnement
+        puis donne un score sur 100 qui est converti en probabilité [0, 1].
+        """
+        messages_batch = []
+        for prompt, img in zip(prompt_texts, images_pil):
+            content = [
+                {"type": "image", "image": img},
+                {"type": "text", "text": prompt}
+            ]
+            messages_batch.append([{"role": "user", "content": content}])
+        
+        texts_batch = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages_batch]
+        image_inputs, video_inputs = process_vision_info(messages_batch)
+        
+        inputs = self.processor(
+            text=texts_batch,
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(self.model.device)
+
+        # On donne plus de tokens (256) pour laisser le modèle "réfléchir"
+        outputs = self.model.generate(**inputs, max_new_tokens=80)
+        
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, outputs)
+        ]
+        
+        responses = self.processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        
+        # Extraction par Regex du score final
+        import re
+        scores = []
+        for resp in responses:
+            # Cherche "Score: 85" ou "Score: 100" à la fin du texte
+            match = re.search(r'Score:\s*(\d+)', resp, re.IGNORECASE)
+            if match:
+                score = min(float(match.group(1)) / 100.0, 1.0) # Normalise entre 0 et 1
+            else:
+                score = 0.5 # Fallback neutre si le modèle a oublié de formater la note
+            scores.append(score)
+            
+        return scores
